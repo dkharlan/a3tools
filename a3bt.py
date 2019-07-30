@@ -12,14 +12,14 @@ from argparse import ArgumentParser
 from configparser import ConfigParser
 
 ARMA3_MAP_TYPES = ["Altis", "Stratis", "Tanoa"]
-RC_FILE = '.a3lbtrc'
+RC_FILE = '.a3btrc'
 RC_DEFAULTS = {
     'build_dir': 'build',
     'pbo_packer': 'PBOConsole.exe',
 
-    # TODO (rabies) - The following options are disabled pending Linux server support.
+    # TODO (dkharlan) - The following options are disabled pending Linux server support.
     # 'remote_connection': '%(remote_user)s@%(remote_host)s',
-    # 'remote_command': '\\AltisLifeTools\\a3lsdt.cmd'
+    # 'remote_command': '\\AltisLifeTools\\a3sdt.cmd'
 }
 
 
@@ -126,7 +126,7 @@ class Commands:
 
         log('Finished building %s' % final_pbo_path)
 
-    # TODO (rabies) - Re-enable when Linux server support is added.
+    # TODO (dkharlan) - Re-enable when Linux server support is added.
     @staticmethod
     def deploy(config, args):
         raise NotImplementedError('deploy command is temporarily disabled pending Linux server support.')
@@ -141,7 +141,7 @@ class Commands:
         # subprocess.check_call(['ssh', config['remote_connection'], config['remote_command'],
         #                        'deploy', base_name, server_relative_path])
 
-    # TODO (rabies) - Re-enable when Linux server support is added.
+    # TODO (dkharlan) - Re-enable when Linux server support is added.
     # noinspection PyUnusedLocal
     @staticmethod
     def start_server(config, args=None):
@@ -149,7 +149,7 @@ class Commands:
         # subprocess.check_call(['ssh', '-t', config['remote_connection'],
         #                        '"' + config['remote_command'] + ' start"'])
 
-    # TODO (rabies) - Re-enable when Linux server support is added.
+    # TODO (dkharlan) - Re-enable when Linux server support is added.
     # noinspection PyUnusedLocal
     @staticmethod
     def stop_server(config, args=None):
@@ -165,7 +165,7 @@ class Commands:
 
 
 def create_parser():
-    main_parser = ArgumentParser(description='Arma 3 Altis/Tanoa Life Build Tool')
+    main_parser = ArgumentParser(description='Arma 3 Build Tool')
     subparsers = main_parser.add_subparsers(help='Commands', dest='command')
     subparsers.required = True
 
