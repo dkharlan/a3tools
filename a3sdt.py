@@ -9,7 +9,10 @@ import logging.config
 from argparse import ArgumentParser
 from asyncio.subprocess import PIPE
 
-CONFIG = {  # TODO (dkharlan) - Move these to .a3sdtrc and read overrides from that file
+# TODO (dkharlan) - Test everything on Windows
+
+# TODO (dkharlan) - Move these to .a3sdtrc and read overrides from that file; use platform-neutral paths
+CONFIG = {
     'arma3_server_name': 'Arma 3 Life',
     'arma3_server_port': 2302,
     'arma3_server_root_directory': '/home/arma3/arma3server',
@@ -114,7 +117,6 @@ def process_is_running(pid):
         return True
 
 
-# noinspection PyTypeChecker
 def check_for_orphaned_pid_file():
     if os.path.exists(CONFIG['arma3_pid_file']):
         assert ARMA3_EXISTING_PID
@@ -159,6 +161,7 @@ def handle_start():
 
     pid = None
     process_description = 'CLI'
+
     # noinspection PyBroadException
     try:
         pid = os.fork()
