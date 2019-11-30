@@ -2,31 +2,101 @@
 
 import os
 import sys
+import json
 import time
 import signal
 import asyncio
 import logging.config
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentError
 from asyncio.subprocess import PIPE
 
 # TODO (dkharlan) - Test everything on Windows
 
 # TODO (dkharlan) - Move these to .a3sdtrc and read overrides from that file; use platform-neutral paths
-CONFIG = {
-    'arma3_server_name': 'Arma 3 Life',
-    'arma3_server_port': 2302,
-    'arma3_server_root_directory': '/home/arma3/arma3server',
-    'arma3_server_command': 'arma3server',
-    'arma3_profile': 'arma3life',
-    'arma3_profiles_directory': '/home/arma3/profiles',
-    'arma3_basic_config_file': '/home/arma3/config/basic.cfg',
-    'arma3_config_file': '/home/arma3/config/config.cfg',
-    'arma3_server_mods': '@life_server;@extDB3',
-    'arma3_server_opts': '',
+BASE_CONFIG = {
+    # 'arma3_server_name': 'Arma 3 Life',
+    # 'arma3_server_port': 2302,
+    # 'arma3_server_root_directory': '/home/arma3/arma3server',
+    # 'arma3_basic_config_file': '/home/arma3/config/basic.cfg',
+    # 'arma3_config_file': '/home/arma3/config/config.cfg',
+    # 'arma3_server_mods': '@life_server;@extDB3',
+
     'arma3_pid_file': '/home/arma3/.a3sdt.arma3.pid',
     'arma3_sigterm_timeout_seconds': 5000,
-    'a3sdt_log_directory': '/home/arma3/logs'
+    'arma3_server_command': 'arma3server',
+
+    # 'arma3_profiles_directory': '/home/arma3/profiles',
+    # 'a3sdt_log_directory': '/home/arma3/logs'
 }
+
+# Manifest selection priority:
+#   1. If a manifest name is given via CLI option, use that one.
+#   2. Look for the manifest named "default" and use that one.
+#   3. If only one manifest is defined, use that one.
+
+# prototype schema:
+# {
+#   "version": 1,
+#   "host": {
+#     "hostname": "delphi"
+#     "user": "arma3"
+#   },
+#   "tools": {
+#     "pbo_packer": 'PBOConsole.exe'
+#   }
+#   "manifests": {
+#     "altisLife": {
+#       "server": {
+#         "name": "Altis Life v1.2.3",
+#         "port": 2302,
+#         "rootDirectory": "some/server/path"
+#       },
+#       "artifacts": {
+#         "basicConfig": "some/local/file",
+#         "config": "some/other/local/file",
+#         "mods": [{
+#           "baseName": "extDB2",
+#           "type": "serverMod"
+#         }, {
+#           "baseName": "life_server",
+#           "type": "serverMod"
+#         }, {
+#           "baseName": "Altis_Life",
+#           "type": "mpmission",
+#           "terrain": "Altis",
+#           "sqm": "local/path/to/sqm/file"
+#         }]
+#       }
+#     }
+#   }
+# }
+
+
+def find_manifest(config, desired_manifest):
+    manifests = config['manifests']
+    if desired_manifest:
+        try:
+            return manifests[desired_manifest]
+        except KeyError as ex:
+            raise ArgumentError('No manifest named "%s" found', desired_manifest)
+    else:
+        if 'default' in manifests:
+            return manifests['default']
+        elif len(manifests) == 1:
+            return manifests.values()[0]
+
+
+def load_config(config, manifest_name):
+    manifest = find_manifest(config, manifest_name)
+    return {**BASE_CONFIG, **{
+        'arma3_server_name': manifest['server']['name'],
+        'arma3_server_port': manifest['server']['port'],
+        'arma3_server_root_directory': manifest['server']['rootDirectory'],
+        'arma3_basic_config_file': manifest[''],
+        'arma3_config_file': '/home/ar',
+        'arma3_server_mods': '@life_se',
+    }}
+
 
 # TODO (DKH) - Clean this up and allow it to set log levels dynamically (e.g. to support a --verbose CLI option)
 logging.config.dictConfig({
@@ -229,6 +299,7 @@ def handle_restart():
 
 def create_parser_and_handlers():
     top_level_parser = ArgumentParser(description='Arma 3 Server Management Tool')
+    top_level_parser.add_argument('manifest', 'm', type=str, nargs='?')
     subparsers = top_level_parser.add_subparsers(help='Commands', dest='command', required=True)
     handlers = {}
 
@@ -247,6 +318,10 @@ def create_parser_and_handlers():
 def main():
     read_pid()
     check_for_orphaned_pid_file()
+
+    with open(config_filename, 'r') as config_file:
+        raw_config = config_file.read()
+    config = json.loads(raw_config)
 
     parser, handlers = create_parser_and_handlers()
     args = parser.parse_args()

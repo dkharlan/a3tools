@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 
-import os
-import sys
 import os.path
+import sys
 import textwrap
 import subprocess
-from shutil import copy, copytree, rmtree
-from itertools import chain
+from shutil import copy, copytree, rmtree, make_archive
+from zipfile import ZipFile
 from datetime import datetime
 from argparse import ArgumentParser
+from tempfile import TemporaryDirectory
+from itertools import chain
+
 from configparser import ConfigParser
 
 ARMA3_MAP_TYPES = ["Altis", "Stratis", "Tanoa"]
@@ -62,11 +64,23 @@ def sqm_filename(sqm_name):
     return sqm_name
 
 
-def map_type(map_name):
-    if map_name not in ARMA3_MAP_TYPES:
-        map_names = ' or '.join([', '.join(ARMA3_MAP_TYPES[:-1]), ARMA3_MAP_TYPES[-1]])
-        raise ValueError('%s does not appear to be an Arma 3 mod (doesn\'t end in %s).' % (map_type, map_names))
-    return map_name
+def _pack_pbo(config, details, manifest_output_directory):
+    source_directory = os.path.realpath(details['baseName'])
+    pbo_base_name = details['baseName']
+    if details['type'] == 'mpmission':
+        pbo_base_name += '.' + details['terrain']
+
+    pbo_output_path = os.path.join(manifest_output_directory, '%ss' % details['type'], '%s.pbo' % pbo_base_name)
+
+    log('Building %s from %s...' % (pbo_base_name, source_directory))
+
+    with TemporaryDirectory() as build_directory:
+        copytree(source_directory, build_directory)
+        if 'sqm' in details:
+            log('Using %s as mission.sqm' % details['sqm'])
+            copy(os.path.realpath(details['sqm']), os.path.join(build_directory, 'mission.sqm'))
+
+        subprocess.run([config['pbo_packer'], '-pack', build_directory, pbo_output_path], stdout=subprocess.PIPE)
 
 
 class Commands:
@@ -79,50 +93,34 @@ class Commands:
 
     @staticmethod
     def pack(config, args):
-        input_dir = args.source_directory
-        pbo_base_name = '%s.%s' % (args.base_name, args.map_type)
+        manifest = config['manifest']
+
         timestamp = datetime.utcnow().strftime('%m%d%Y_%H%M%S')
+        build_name = '%s_%s' % (manifest['baseName'], timestamp)
 
-        if args.force_output_pbo_name:
-            relative_pbo_path = args.force_output_pbo_name
-        else:
-            relative_pbo_path = os.path.join(config['build_dir'], pbo_base_name + '_' + timestamp + '.pbo')
+        results_directory = os.path.realpath('results')
+        with TemporaryDirectory() as build_directory:
+            config_directory = os.path.join(build_directory, 'config')
 
-        absolute_input_dir = os.path.realpath(input_dir)
-        temp_dir = os.path.join(config['build_dir'], timestamp)
-        relative_build_path = os.path.join(temp_dir, pbo_base_name)
-        final_build_path = os.path.realpath(relative_build_path)
+            os.makedirs(build_directory, exist_ok=True)
+            os.makedirs(config_directory)
+            if any(map(lambda m: m['type'] == 'mpmission', manifest['mods'])):
+                os.makedirs(os.path.join(build_directory, 'mpmissions'))
+            if any(map(lambda m: m['type'] == 'serverMod', manifest['mods'])):
+                os.makedirs(os.path.join(build_directory, 'serverMods'))
 
-        final_pbo_path = os.path.realpath(relative_pbo_path)
-        log('Building %s from %s' % (final_pbo_path, absolute_input_dir))
-        copytree(absolute_input_dir, relative_build_path)
-        if args.mission_sqm:
-            existing_sqm_name = os.path.join(final_build_path, 'mission.sqm')
-            if os.path.exists(existing_sqm_name):
-                os.remove(existing_sqm_name)
-            copy(args.mission_sqm, existing_sqm_name)
-            log('Used %s for mission.sqm' % args.mission_sqm)
-        try:
-            subprocess.run([config['pbo_packer'], '-pack', final_build_path, final_pbo_path],
-                           stdout=subprocess.PIPE)
-        except FileNotFoundError as ex:
-            if ex.filename is None:
-                hint = '(Hint: Make sure %s is accessible via your PATH environment variable.)' % config['pbo_packer']
-            else:
-                hint = None
-            error(
-                '''
-                Could not pack PBO because the file %s could not be found.
-                Details:
-                \tpbo_packer = %s %s
-                \tbuild path = %s
-                \tpbo path = %s
-                '''
-                % (ex.filename, config['pbo_packer'], hint, final_build_path, final_pbo_path)
-            )
+            for mod_details in manifest['mods']:
+                if mod_details['type'] in {'mpmission', 'serverMod'}:
+                    _pack_pbo(config, mod_details, build_directory)
+                else:
+                    raise NotImplementedError('Unknown mod type "%s" for mod "%s"'
+                                              % (mod_details['type'], mod_details['baseName']))
 
-        if not os.path.exists(final_pbo_path):
-            raise RuntimeError('Failed to build PBO.')
+            copy(os.path.realpath(config['artifacts']['basicConfig']), os.path.join(config_directory, 'basic.cfg'))
+            copy(os.path.realpath(config['artifacts']['config']), os.path.join(config_directory, 'config.cfg'))
+
+            with ZipFile(os.path.join(results_directory, '%s.zip' % build_name), 'w') as result_archive:
+                result_archive.write(build_directory)
 
         log('Finished building %s' % final_pbo_path)
 
@@ -172,12 +170,7 @@ def create_parser():
     subparsers.add_parser('clean', help='Clean the build directory')
 
     pack_parser = subparsers.add_parser('pack', help='Build a PBO')
-    pack_parser.add_argument('--source-directory', '-s', type=mod_directory, help='The source path for the mod')
-    pack_parser.add_argument('--base-name', '-b', type=str, help='The base name for the mod')
-    pack_parser.add_argument('--map-type', '-m', type=map_type,
-                             help=' or '.join([', '.join(ARMA3_MAP_TYPES[:-1]), ARMA3_MAP_TYPES[-1]]))
-    pack_parser.add_argument('--mission-sqm', '-S', type=sqm_filename, help='The file to use as mission.sqm in the PBO')
-    pack_parser.add_argument('--force-output-pbo-name', '-o', type=pbo_filename, help='The name of the PBO to create')
+    pack_parser.add_argument('manifest', type=str, help='The manifest to pack, defined in .a3trc', required=True)
 
     deploy_parser = subparsers.add_parser('deploy', help='Deploy a PBO')
     deploy_parser.add_argument('<mod base path>', type=str, help='The base directory for the mod')
@@ -213,6 +206,10 @@ def main():
         command = args.command
 
     config = load_config()
+    manifest = config['manifests'][args.manifest]
+    del config['manifests']
+    config['manifest'] = manifest
+
     commands_to_handlers[command](config, args)
 
 
